@@ -25,6 +25,9 @@ if not GOOGLE_API_KEY:
 
 os.environ["GOOGLE_API_KEY"] = GOOGLE_API_KEY
 
+# TEMPORARY DEBUG LINE - remove after fixing
+st.sidebar.caption(f"🔑 Key loaded, ends in: ...{GOOGLE_API_KEY[-4:]}")
+
 # Allow importing from src/
 sys.path.append(os.path.join(os.path.dirname(__file__), "src"))
 
