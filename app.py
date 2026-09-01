@@ -25,7 +25,6 @@ if not GOOGLE_API_KEY:
 
 os.environ["GOOGLE_API_KEY"] = GOOGLE_API_KEY
 
-
 # Allow importing from src/
 sys.path.append(os.path.join(os.path.dirname(__file__), "src"))
 
