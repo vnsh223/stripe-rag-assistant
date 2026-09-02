@@ -176,6 +176,18 @@ hr {
 
 
 # ============================================================
+# SESSION STATE - CHAT HISTORY
+# ============================================================
+
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+
+if "pending_question" not in st.session_state:
+    st.session_state.pending_question = None
+
+
+# ============================================================
 # CACHE
 # ============================================================
 
@@ -228,6 +240,21 @@ with st.sidebar:
 
     st.divider()
 
+    # --------------------------------------------------------
+    # CLEAR CHAT BUTTON
+    # --------------------------------------------------------
+
+    if st.button(
+        "🗑️ Clear Chat",
+        use_container_width=True,
+    ):
+
+        st.session_state.messages = []
+
+        st.rerun()
+
+    st.divider()
+
     st.caption(
         "LangChain • Chroma • Hugging Face • Groq"
     )
@@ -237,7 +264,10 @@ with st.sidebar:
 # HERO
 # ============================================================
 
-st.markdown('<div class="hero-container">', unsafe_allow_html=True)
+st.markdown(
+    '<div class="hero-container">',
+    unsafe_allow_html=True
+)
 
 st.markdown(
     '<div class="hero-label">'
@@ -265,7 +295,10 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.markdown("</div>", unsafe_allow_html=True)
+st.markdown(
+    '</div>',
+    unsafe_allow_html=True
+)
 
 
 # ============================================================
@@ -312,9 +345,6 @@ with c3:
 # ============================================================
 
 st.subheader("💡 Try asking")
-
-if "pending_question" not in st.session_state:
-    st.session_state.pending_question = None
 
 
 q1, q2, q3 = st.columns(3)
@@ -371,59 +401,122 @@ if user_question:
 
 
 # ============================================================
-# PROCESS QUESTION
+# PROCESS NEW QUESTION
 # ============================================================
 
 if st.session_state.pending_question:
 
     question = st.session_state.pending_question
 
+    # Clear pending question immediately
     st.session_state.pending_question = None
 
+    # --------------------------------------------------------
+    # Add USER message to chat history
+    # --------------------------------------------------------
 
-    # USER MESSAGE
+    st.session_state.messages.append(
+        {
+            "role": "user",
+            "content": question,
+        }
+    )
 
-    with st.chat_message(
-        "user",
-        avatar="👤",
+    # --------------------------------------------------------
+    # Get RAG answer
+    # --------------------------------------------------------
+
+    with st.spinner(
+        "Searching Stripe documentation..."
     ):
 
-        st.write(question)
+        answer, sources = ask(
+            question,
+            vectorstore,
+            llm,
+        )
+
+    # --------------------------------------------------------
+    # Add ASSISTANT message to chat history
+    # --------------------------------------------------------
+
+    st.session_state.messages.append(
+        {
+            "role": "assistant",
+            "content": answer,
+            "sources": sources,
+        }
+    )
+
+    # --------------------------------------------------------
+    # Rerun so complete conversation is rendered together
+    # --------------------------------------------------------
+
+    st.rerun()
 
 
-    # AI MESSAGE
+# ============================================================
+# DISPLAY CHAT HISTORY
+# ============================================================
 
-    with st.chat_message(
-        "assistant",
-        avatar="💳",
-    ):
+if st.session_state.messages:
 
-        with st.spinner(
-            "Searching Stripe documentation..."
-        ):
+    st.subheader("💬 Conversation")
 
-            answer, sources = ask(
-                question,
-                vectorstore,
-                llm,
-            )
+    for message in st.session_state.messages:
 
-        st.markdown(answer)
+        role = message["role"]
 
+        content = message["content"]
 
-        # SOURCES
+        # ----------------------------------------------------
+        # USER MESSAGE
+        # ----------------------------------------------------
 
-        if sources:
+        if role == "user":
 
-            st.divider()
+            with st.chat_message(
+                "user",
+                avatar="👤",
+            ):
 
-            st.markdown("#### 📚 Sources")
+                st.markdown(content)
 
-            for source in sources:
+        # ----------------------------------------------------
+        # ASSISTANT MESSAGE
+        # ----------------------------------------------------
 
-                st.markdown(
-                    f"[🔗 {source}]({source})"
+        elif role == "assistant":
+
+            with st.chat_message(
+                "assistant",
+                avatar="💳",
+            ):
+
+                st.markdown(content)
+
+                # ------------------------------------------------
+                # SOURCES FOR THIS SPECIFIC ANSWER
+                # ------------------------------------------------
+
+                sources = message.get(
+                    "sources",
+                    []
                 )
+
+                if sources:
+
+                    st.divider()
+
+                    st.markdown(
+                        "#### 📚 Sources"
+                    )
+
+                    for source in sources:
+
+                        st.markdown(
+                            f"[🔗 {source}]({source})"
+                        )
 
 
 # ============================================================
