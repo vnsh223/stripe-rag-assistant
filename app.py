@@ -529,3 +529,20 @@ st.caption(
     "Stripe Docs AI  •  RAG-powered documentation assistant  •  "
     "Grounded responses from Stripe documentation"
 )
+
+st.markdown(
+    """
+    <script>
+    setTimeout(function() {
+        const main = window.parent.document.querySelector('section.main');
+        if (main) {
+            main.scrollTo({
+                top: main.scrollHeight,
+                behavior: 'smooth'
+            });
+        }
+    }, 300);
+    </script>
+    """,
+    unsafe_allow_html=True
+    )
