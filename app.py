@@ -1,53 +1,6 @@
-"""
-Stripe Docs AI Assistant
-------------------------
-Interactive Streamlit UI for the Stripe Documentation RAG Assistant.
-
-Run:
-    streamlit run app.py
-"""
-
-import os
-import sys
 import streamlit as st
-from dotenv import load_dotenv
 
-
-# ============================================================
-# CONFIGURATION
-# ============================================================
-
-load_dotenv()
-
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-
-# Streamlit Cloud support
-if not GROQ_API_KEY:
-    try:
-        GROQ_API_KEY = st.secrets.get("GROQ_API_KEY")
-    except Exception:
-        GROQ_API_KEY = None
-
-if not GROQ_API_KEY:
-    st.error(
-        "GROQ_API_KEY is missing.\n\n"
-        "Add it to your `.env` file locally or "
-        "Streamlit Cloud Secrets when deployed."
-    )
-    st.stop()
-
-os.environ["GROQ_API_KEY"] = GROQ_API_KEY
-
-
-# ============================================================
-# IMPORT RAG PIPELINE
-# ============================================================
-
-sys.path.append(
-    os.path.join(os.path.dirname(__file__), "src")
-)
-
-from rag_chain import load_vectorstore, ask
+from src.rag_chain import ask, load_llm, load_vectorstore
 
 
 # ============================================================
@@ -56,257 +9,188 @@ from rag_chain import load_vectorstore, ask
 
 st.set_page_config(
     page_title="Stripe Docs AI",
-    page_icon="⚡",
+    page_icon="💳",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
 
 # ============================================================
-# CUSTOM CSS
+# DARK THEME
 # ============================================================
 
-st.markdown(
-    """
-    <style>
+st.markdown("""
+<style>
 
-    /* ---------- Main app ---------- */
+.stApp {
+    background: #090d16;
+}
 
-    .stApp {
-        background:
-            radial-gradient(
-                circle at 50% -20%,
-                rgba(99, 91, 255, 0.15),
-                transparent 40%
-            ),
-            #08080d;
-    }
-
-    .main {
-        max-width: 1200px;
-        margin: auto;
-    }
+.block-container {
+    max-width: 1150px;
+    padding-top: 2rem;
+    padding-bottom: 4rem;
+}
 
 
-    /* ---------- Header ---------- */
+/* SIDEBAR */
 
-    .hero {
-        text-align: center;
-        padding: 45px 20px 25px 20px;
-    }
-
-    .hero-icon {
-        font-size: 45px;
-        margin-bottom: 8px;
-    }
-
-    .hero-title {
-        font-size: 42px;
-        font-weight: 800;
-        letter-spacing: -1px;
-        margin-bottom: 8px;
-
-        background: linear-gradient(
-            90deg,
-            #ffffff,
-            #a9a4ff
-        );
-
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-    }
-
-    .hero-subtitle {
-        color: #9b9ba8;
-        font-size: 16px;
-        max-width: 700px;
-        margin: auto;
-        line-height: 1.6;
-    }
+[data-testid="stSidebar"] {
+    background: #070a11;
+    border-right: 1px solid #1d2636;
+}
 
 
-    /* ---------- Status ---------- */
+/* HEADINGS */
 
-    .status-container {
-        display: flex;
-        justify-content: center;
-        margin-top: 18px;
-    }
+h1, h2, h3 {
+    color: #f8fafc !important;
+}
 
-    .status {
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-
-        padding: 6px 13px;
-
-        border: 1px solid #272735;
-        border-radius: 20px;
-
-        background: #111119;
-
-        color: #a8a8b5;
-        font-size: 13px;
-    }
-
-    .status-dot {
-        width: 8px;
-        height: 8px;
-
-        background: #36d399;
-        border-radius: 50%;
-    }
+p, span, label {
+    color: #cbd5e1;
+}
 
 
-    /* ---------- Example cards ---------- */
+/* HERO */
 
-    .example-title {
-        text-align: center;
-        color: #b7b7c5;
-        font-size: 14px;
-        margin-top: 25px;
-        margin-bottom: 10px;
-    }
+.hero-container {
+    padding: 35px 10px 25px 10px;
+}
 
+.hero-label {
+    color: #8b7cff;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+}
 
-    /* ---------- Chat ---------- */
+.hero-title {
+    color: white;
+    font-size: 48px;
+    font-weight: 800;
+    letter-spacing: -2px;
+    margin-top: 8px;
+}
 
-    [data-testid="stChatMessage"] {
-        border: 1px solid #242431;
-        border-radius: 16px;
-        padding: 15px;
-        margin-bottom: 12px;
-
-        background: rgba(18, 18, 27, 0.7);
-    }
-
-    [data-testid="stChatMessage"] p {
-        line-height: 1.65;
-    }
-
-
-    /* ---------- Chat input ---------- */
-
-    [data-testid="stChatInput"] {
-        border-radius: 16px;
-    }
+.hero-description {
+    color: #94a3b8;
+    font-size: 17px;
+    max-width: 700px;
+    line-height: 1.6;
+}
 
 
-    /* ---------- Sidebar ---------- */
+/* STATUS */
 
-    [data-testid="stSidebar"] {
-        background: #0d0d14;
-        border-right: 1px solid #242431;
-    }
-
-    .sidebar-title {
-        font-size: 20px;
-        font-weight: 700;
-        margin-bottom: 5px;
-    }
-
-    .sidebar-description {
-        color: #92929f;
-        font-size: 13px;
-        line-height: 1.6;
-    }
+.status {
+    color: #4ade80;
+    font-size: 14px;
+    margin-top: 18px;
+}
 
 
-    /* ---------- Tech badges ---------- */
+/* FEATURE CARDS */
 
-    .tech-badge {
-        display: inline-block;
+[data-testid="stHorizontalBlock"] {
+    gap: 1rem;
+}
 
-        padding: 5px 9px;
-        margin: 3px;
+.feature-card {
+    background: #101622;
+    border: 1px solid #202b3d;
+    border-radius: 16px;
+    padding: 22px;
+    min-height: 135px;
+}
 
-        border-radius: 7px;
-
-        background: #171721;
-        border: 1px solid #292938;
-
-        color: #b9b9c7;
-        font-size: 12px;
-    }
-
-
-    /* ---------- Sources ---------- */
-
-    .source-card {
-        padding: 12px 14px;
-
-        margin-top: 8px;
-
-        border-radius: 10px;
-
-        background: #111119;
-        border: 1px solid #292938;
-
-        font-size: 13px;
-        color: #aaaab8;
-    }
-
-    .source-label {
-        color: #777786;
-        font-size: 11px;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        margin-bottom: 3px;
-    }
+.feature-card:hover {
+    border-color: #635bff;
+}
 
 
-    /* ---------- Divider ---------- */
+/* CHAT */
 
-    hr {
-        border-color: #252532 !important;
-    }
+[data-testid="stChatMessage"] {
+    background: #101622;
+    border: 1px solid #202b3d;
+    border-radius: 16px;
+    margin-bottom: 12px;
+}
 
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+
+/* INPUT */
+
+[data-testid="stChatInput"] {
+    border: 1px solid #334155;
+}
+
+
+/* BUTTONS */
+
+.stButton > button {
+    background: #101622;
+    border: 1px solid #263247;
+    color: #cbd5e1;
+    border-radius: 12px;
+    min-height: 44px;
+}
+
+.stButton > button:hover {
+    border-color: #635bff;
+    color: white;
+    background: #171d32;
+}
+
+
+/* DIVIDER */
+
+hr {
+    border-color: #1e293b !important;
+}
+
+
+/* SOURCE */
+
+.source {
+    background: #0d131f;
+    border: 1px solid #202b3d;
+    border-radius: 10px;
+    padding: 10px 14px;
+    margin-top: 8px;
+}
+
+
+/* FOOTER */
+
+.footer {
+    text-align: center;
+    color: #475569;
+    font-size: 13px;
+    margin-top: 50px;
+}
+
+</style>
+""", unsafe_allow_html=True)
+
 
 # ============================================================
-# LOAD RAG RESOURCES
+# CACHE
 # ============================================================
 
-from langchain_groq import ChatGroq
+@st.cache_resource
+def get_vectorstore():
+    return load_vectorstore()
 
 
 @st.cache_resource
 def get_llm():
-    """
-    Load the Groq LLM once and reuse it.
-    """
-
-    return ChatGroq(
-        model="openai/gpt-oss-20b",
-        temperature=0.2,
-        groq_api_key=GROQ_API_KEY,
-    )
+    return load_llm()
 
 
-@st.cache_resource
-def get_resources():
-    """
-    Load the Chroma vector store once and reuse it.
-    """
-
-    vectorstore = load_vectorstore()
-
-    return vectorstore
-
-
-# Load resources
-vectorstore = get_resources()
+vectorstore = get_vectorstore()
 llm = get_llm()
-
-# ============================================================
-# SESSION STATE
-# ============================================================
-
-if "messages" not in st.session_state:
-    st.session_state.messages = []
 
 
 # ============================================================
@@ -315,266 +199,240 @@ if "messages" not in st.session_state:
 
 with st.sidebar:
 
-    st.markdown(
-        '<div class="sidebar-title">⚡ Stripe Docs AI</div>',
-        unsafe_allow_html=True,
-    )
+    st.title("💳 Stripe Docs AI")
 
-    st.markdown(
-        """
-        <div class="sidebar-description">
-        An AI assistant that answers questions using
-        your curated Stripe documentation.
-        </div>
-        """,
-        unsafe_allow_html=True,
+    st.caption("AI documentation assistant")
+
+    st.success("● RAG Pipeline Online")
+
+    st.divider()
+
+    st.subheader("🧠 Architecture")
+
+    st.write("📄 Stripe Documentation")
+    st.write("✂️ Document Chunking")
+    st.write("🔢 Hugging Face Embeddings")
+    st.write("🗄️ Chroma Vector Database")
+    st.write("🔍 Similarity Retrieval")
+    st.write("⚡ Groq LLM")
+
+    st.divider()
+
+    st.subheader("🔐 Grounded AI")
+
+    st.caption(
+        "Answers are generated only from "
+        "the Stripe documentation in the "
+        "knowledge base."
     )
 
     st.divider()
 
-    # System status
-    st.subheader("System")
-
-    st.success("RAG pipeline online")
-
-    st.markdown(
-        """
-        <span class="tech-badge">LangChain</span>
-        <span class="tech-badge">Chroma</span>
-        <span class="tech-badge">HuggingFace</span>
-        <span class="tech-badge">Groq</span>
-        <span class="tech-badge">Streamlit</span>
-        """,
-        unsafe_allow_html=True,
+    st.caption(
+        "LangChain • Chroma • Hugging Face • Groq"
     )
-
-    st.divider()
-
-    # Architecture
-    st.subheader("Architecture")
-
-    st.markdown(
-        """
-        **1. User Question**
-
-        ↓
-
-        **2. Hugging Face Embeddings**
-
-        ↓
-
-        **3. Chroma Vector Search**
-
-        ↓
-
-        **4. Relevant Stripe Docs**
-
-        ↓
-
-        **5. Groq LLM**
-
-        ↓
-
-        **6. Grounded Answer**
-        """
-    )
-
-    st.divider()
-
-    # RAG settings
-    st.subheader("RAG Settings")
-
-    st.markdown(
-        """
-        **Embedding model**
-
-        `all-MiniLM-L6-v2`
-
-        **Vector database**
-
-        `Chroma`
-
-        **LLM**
-
-        `openai/gpt-oss-20b`
-
-        **Retrieved chunks**
-
-        `8`
-        """
-    )
-
-    st.divider()
-
-    # Clear chat
-    if st.button(
-        "🗑️ Clear conversation",
-        use_container_width=True,
-    ):
-        st.session_state.messages = []
-        st.rerun()
 
 
 # ============================================================
-# MAIN HEADER
+# HERO
 # ============================================================
+
+st.markdown('<div class="hero-container">', unsafe_allow_html=True)
 
 st.markdown(
-    """
-    <div style="padding: 30px 0 15px 0;">
-        <h1 style="margin-bottom: 5px;">
-            ⚡ Stripe Docs AI
-        </h1>
-        <p style="color: #9b9ba8; font-size: 15px;">
-            Ask questions about Stripe documentation.
-            Get answers grounded in your available Stripe docs.
-        </p>
-    </div>
-    """,
+    '<div class="hero-label">'
+    'AI-POWERED DOCUMENTATION ASSISTANT'
+    '</div>',
     unsafe_allow_html=True,
 )
 
-st.divider()
+st.markdown(
+    '<div class="hero-title">Stripe Docs AI</div>',
+    unsafe_allow_html=True,
+)
 
-# ============================================================
-# DISPLAY CHAT HISTORY
-# ============================================================
+st.markdown(
+    '<div class="hero-description">'
+    'Ask questions about Stripe and get '
+    'documentation-grounded answers using '
+    'Retrieval-Augmented Generation.'
+    '</div>',
+    unsafe_allow_html=True,
+)
 
-for message in st.session_state.messages:
+st.markdown(
+    '<div class="status">● RAG pipeline ready</div>',
+    unsafe_allow_html=True,
+)
 
-    with st.chat_message(message["role"]):
-
-        st.markdown(message["content"])
-
-        sources = message.get("sources", [])
-
-        if sources:
-
-            with st.expander(
-                f"📚 Sources ({len(sources)})"
-            ):
-
-                for source in sources:
-
-                    filename = os.path.basename(source)
-
-                    st.markdown(
-                        f"""
-                        <div class="source-card">
-
-                            <div class="source-label">
-                                Stripe documentation
-                            </div>
-
-                            📄 {filename}
-
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
+st.markdown("</div>", unsafe_allow_html=True)
 
 
 # ============================================================
-# GET QUESTION
+# FEATURES
 # ============================================================
 
-question = st.chat_input(
-    "Ask anything about the Stripe documentation..."
+st.subheader("Explore Stripe documentation")
+
+c1, c2, c3 = st.columns(3)
+
+
+with c1:
+
+    st.markdown("### 🔗 Webhooks")
+
+    st.caption(
+        "Understand webhook events, "
+        "signatures and event handling."
+    )
+
+
+with c2:
+
+    st.markdown("### 💰 Payments")
+
+    st.caption(
+        "Learn about payments, "
+        "PaymentIntents and Stripe APIs."
+    )
+
+
+with c3:
+
+    st.markdown("### ⚡ Stripe APIs")
+
+    st.caption(
+        "Search Stripe documentation "
+        "and understand API concepts."
+    )
+
+
+# ============================================================
+# SUGGESTED QUESTIONS
+# ============================================================
+
+st.subheader("💡 Try asking")
+
+if "pending_question" not in st.session_state:
+    st.session_state.pending_question = None
+
+
+q1, q2, q3 = st.columns(3)
+
+
+with q1:
+
+    if st.button(
+        "How do webhooks work?",
+        use_container_width=True,
+    ):
+
+        st.session_state.pending_question = (
+            "How do Stripe webhooks work?"
+        )
+
+
+with q2:
+
+    if st.button(
+        "What is a PaymentIntent?",
+        use_container_width=True,
+    ):
+
+        st.session_state.pending_question = (
+            "What is a PaymentIntent?"
+        )
+
+
+with q3:
+
+    if st.button(
+        "How do I verify webhooks?",
+        use_container_width=True,
+    ):
+
+        st.session_state.pending_question = (
+            "How do I verify a webhook signature?"
+        )
+
+
+# ============================================================
+# CHAT INPUT
+# ============================================================
+
+user_question = st.chat_input(
+    "Ask anything about Stripe..."
 )
 
 
-# Example question handling
-if (
-    not question
-    and "example_question" in st.session_state
-):
+if user_question:
 
-    question = st.session_state.pop(
-        "example_question"
-    )
+    st.session_state.pending_question = user_question
 
 
 # ============================================================
 # PROCESS QUESTION
 # ============================================================
 
-if question:
+if st.session_state.pending_question:
 
-    # Add user message
-    st.session_state.messages.append(
-        {
-            "role": "user",
-            "content": question,
-        }
-    )
+    question = st.session_state.pending_question
 
-    with st.chat_message("user"):
-        st.markdown(question)
+    st.session_state.pending_question = None
 
-    # Generate answer
-    with st.chat_message("assistant"):
 
-        try:
+    # USER MESSAGE
 
-            with st.spinner(
-                "🔎 Searching Stripe documentation..."
-            ):
+    with st.chat_message(
+        "user",
+        avatar="👤",
+    ):
 
-                answer, sources = ask(
-                    question,
-                    vectorstore,
-                    # ask() requires an LLM.
-                    # rag_chain creates it through the provided object.
-                    get_llm(),
+        st.write(question)
+
+
+    # AI MESSAGE
+
+    with st.chat_message(
+        "assistant",
+        avatar="💳",
+    ):
+
+        with st.spinner(
+            "Searching Stripe documentation..."
+        ):
+
+            answer, sources = ask(
+                question,
+                vectorstore,
+                llm,
+            )
+
+        st.markdown(answer)
+
+
+        # SOURCES
+
+        if sources:
+
+            st.divider()
+
+            st.markdown("#### 📚 Sources")
+
+            for source in sources:
+
+                st.markdown(
+                    f"[🔗 {source}]({source})"
                 )
 
-            st.markdown(answer)
 
-            if sources:
+# ============================================================
+# FOOTER
+# ============================================================
 
-                with st.expander(
-                    f"📚 Sources ({len(sources)})"
-                ):
+st.divider()
 
-                    for source in sources:
-
-                        filename = os.path.basename(source)
-
-                        st.markdown(
-                            f"""
-                            <div class="source-card">
-
-                                <div class="source-label">
-                                    Stripe documentation
-                                </div>
-
-                                📄 {filename}
-
-                            </div>
-                            """,
-                            unsafe_allow_html=True,
-                        )
-
-        except Exception as e:
-
-            answer = (
-                "I ran into a temporary problem while "
-                "processing your question. Please try again."
-            )
-
-            sources = []
-
-            st.error(
-                f"Error: {str(e)}"
-            )
-
-            st.markdown(answer)
-
-    # Save assistant message
-    st.session_state.messages.append(
-        {
-            "role": "assistant",
-            "content": answer,
-            "sources": sources,
-        }
-    )
+st.caption(
+    "Stripe Docs AI  •  RAG-powered documentation assistant  •  "
+    "Grounded responses from Stripe documentation"
+)
