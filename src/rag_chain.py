@@ -1,144 +1,570 @@
 """
-Stripe Docs RAG Assistant - RAG Chain
-----------------------------------------
-The core retrieval + generation pipeline:
-  1. Take a user question
-  2. Retrieve the most relevant chunks from the Chroma vector store
-  3. Feed those chunks + the question to Gemini
-  4. Return a grounded answer with source citations, or a clear
-     "not found in the docs" fallback instead of hallucinating
+Stripe Docs AI Assistant - RAG Chain
+------------------------------------
 
-Run this file directly for a quick terminal test loop before wiring it
-into the Streamlit UI.
+Core Retrieval-Augmented Generation (RAG) pipeline.
+
+Flow:
+
+User Question
+      ↓
+Hugging Face Embedding
+      ↓
+Chroma Vector Search
+      ↓
+Top relevant Stripe documentation chunks
+      ↓
+Groq LLM
+      ↓
+Grounded Answer + Sources
+
+Technologies:
+- LangChain
+- Hugging Face Embeddings
+- Chroma
+- Groq
 """
+
+
+# ============================================================
+# IMPORTS
+# ============================================================
 
 import os
 import time
+
 from dotenv import load_dotenv
-from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
+
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
-from langchain.prompts import ChatPromptTemplate
+from langchain_groq import ChatGroq
+from langchain_core.prompts import ChatPromptTemplate
+
+
+# ============================================================
+# LOAD ENVIRONMENT VARIABLES
+# ============================================================
 
 load_dotenv()
 
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-if not GOOGLE_API_KEY or GOOGLE_API_KEY == "your_gemini_api_key_here":
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+
+
+if not GROQ_API_KEY:
     raise ValueError(
-        "GOOGLE_API_KEY not found or still set to the placeholder value. "
-        "Check your .env file."
+        "GROQ_API_KEY was not found.\n"
+        "Please add GROQ_API_KEY to your .env file."
     )
 
-PERSIST_DIR = os.path.join(os.path.dirname(__file__), "..", "chroma_db")
 
-# How many chunks to retrieve per question. 4 gives enough context to
-# answer most questions without overwhelming the prompt with noise.
-TOP_K = 4
+if GROQ_API_KEY == "your_groq_api_key_here":
+    raise ValueError(
+        "GROQ_API_KEY is still using the placeholder value.\n"
+        "Please add your real Groq API key to .env."
+    )
 
-# The system prompt is deliberately strict about grounding: it must refuse
-# to answer from general knowledge if the docs don't cover it, which is
-# the key thing that separates a real RAG system from "ChatGPT with extra
-# steps" - and a good thing to point out in an interview.
-SYSTEM_PROMPT = """You are a support assistant that answers questions using \
-ONLY the Stripe documentation excerpts provided below. You are not allowed \
-to use any outside knowledge about Stripe or payments in general.
 
-Rules:
-- If the answer is fully or partially contained in the excerpts, answer \
-clearly and concisely, and mention which excerpt(s) you used.
-- If the excerpts do NOT contain enough information to answer the \
-question, say plainly: "I couldn't find this in the Stripe docs I have \
-access to." Do not guess or fill gaps with general knowledge.
-- Keep answers focused and practical, as if helping a support agent or \
-developer quickly.
+# ============================================================
+# CONFIGURATION
+# ============================================================
 
-Documentation excerpts:
+# Location of the Chroma database
+PERSIST_DIR = os.path.join(
+    os.path.dirname(__file__),
+    "..",
+    "chroma_db",
+)
+
+
+# Number of relevant chunks retrieved from Chroma
+TOP_K = 8
+
+
+# Same embedding model used when Chroma was built
+EMBEDDING_MODEL = (
+    "sentence-transformers/all-MiniLM-L6-v2"
+)
+
+
+# Groq model
+LLM_MODEL = "openai/gpt-oss-20b"
+
+
+# ============================================================
+# SYSTEM PROMPT
+# ============================================================
+
+SYSTEM_PROMPT = """
+You are Stripe Docs AI, a developer support assistant.
+
+Your job is to answer questions using ONLY the Stripe
+documentation excerpts provided below.
+
+IMPORTANT RULES:
+
+1. Use ONLY the provided documentation excerpts.
+
+2. Do NOT use outside knowledge about Stripe, payments,
+   APIs, programming, or other topics.
+
+3. Do NOT guess or invent information.
+
+4. If the documentation contains enough information,
+   answer clearly and practically.
+
+5. If the documentation contains only part of the answer,
+   explain only the information supported by the excerpts.
+
+6. If the documentation does NOT contain enough information
+   to answer the question, respond exactly:
+
+"I couldn't find this in the Stripe docs I have access to."
+
+7. Keep answers focused and useful for developers.
+
+8. For technical questions, use bullet points or numbered
+   steps when appropriate.
+
+9. Do not invent Stripe API names, parameters, endpoints,
+   events, products, or implementation details.
+
+10. Do not use information from the source URL itself.
+    Use only the documentation text provided in the excerpts.
+
+Stripe documentation excerpts:
+
 {context}
 """
 
 
+# ============================================================
+# LOAD HUGGING FACE EMBEDDINGS + CHROMA
+# ============================================================
+
 def load_vectorstore():
-    embeddings = GoogleGenerativeAIEmbeddings(
-        model="models/gemini-embedding-001",
-        google_api_key=GOOGLE_API_KEY,
+    """
+    Load the existing Chroma vector database.
+
+    The Chroma database was created using:
+
+        sentence-transformers/all-MiniLM-L6-v2
+
+    Returns:
+        Chroma vector store
+    """
+
+    print("Loading Hugging Face embedding model...")
+
+    embeddings = HuggingFaceEmbeddings(
+        model_name=EMBEDDING_MODEL
     )
-    return Chroma(
+
+    print("Loading Chroma vector store...")
+
+    vectorstore = Chroma(
         collection_name="stripe_docs",
         embedding_function=embeddings,
         persist_directory=PERSIST_DIR,
     )
 
+    return vectorstore
+
+
+# ============================================================
+# LOAD GROQ LLM
+# ============================================================
+
+def load_llm():
+    """
+    Create and return the Groq language model.
+    """
+
+    print("Loading Groq LLM...")
+
+    llm = ChatGroq(
+        model=LLM_MODEL,
+        temperature=0.2,
+        groq_api_key=GROQ_API_KEY,
+    )
+
+    return llm
+
+
+# ============================================================
+# FORMAT RETRIEVED DOCUMENTS
+# ============================================================
 
 def format_context(docs):
-    """Turn retrieved chunks into a numbered, source-labeled context block."""
+    """
+    Convert retrieved documents into context for the LLM.
+
+    Each Markdown document begins with something like:
+
+        Source: https://docs.stripe.com/webhooks
+
+    The retrieved text is passed to the LLM together with
+    the source information.
+    """
+
     blocks = []
+
     for i, doc in enumerate(docs, start=1):
-        source = doc.metadata.get("source", "unknown source")
-        blocks.append(f"[Excerpt {i} - Source: {source}]\n{doc.page_content}")
+
+        source_file = doc.metadata.get(
+            "source",
+            "unknown source"
+        )
+
+        content = doc.page_content.strip()
+
+        blocks.append(
+            f"[Excerpt {i}]\n"
+            f"Source file: {source_file}\n\n"
+            f"{content}"
+        )
+
     return "\n\n".join(blocks)
 
-def retrieve_with_retry(retriever, question, max_attempts=4):
-    """Retry retrieval with backoff - the free tier rate limit can be hit
-    on query embeddings too, not just during the initial bulk ingest."""
+
+# ============================================================
+# EXTRACT ORIGINAL STRIPE DOCUMENTATION URL
+# ============================================================
+
+def extract_source_url(doc):
+    """
+    Extract the original Stripe documentation URL from
+    the beginning of the Markdown document.
+
+    Example:
+
+        Source: https://docs.stripe.com/webhooks
+
+    Returns:
+        Stripe documentation URL
+        or None if no valid Stripe URL is found.
+    """
+
+    content = doc.page_content.strip()
+
+    if not content:
+        return None
+
+    lines = content.splitlines()
+
+    if not lines:
+        return None
+
+    first_line = lines[0].strip()
+
+    if not first_line.startswith("Source:"):
+        return None
+
+    url = first_line.replace(
+        "Source:",
+        "",
+        1
+    ).strip()
+
+    if url.startswith(
+        "https://docs.stripe.com/"
+    ):
+        return url
+
+    return None
+
+
+# ============================================================
+# RETRIEVAL WITH RETRY
+# ============================================================
+
+def retrieve_with_retry(
+    retriever,
+    question,
+    max_attempts=3,
+):
+    """
+    Retrieve relevant documents from Chroma.
+
+    Retries temporary retrieval errors up to max_attempts.
+    """
+
     attempt = 0
+
     while True:
+
         try:
+
             return retriever.invoke(question)
-        except Exception as e:
+
+        except Exception as error:
+
             attempt += 1
+
             if attempt >= max_attempts:
-                raise
-            wait = 15 * attempt
-            print(f"  (Rate limited, retrying in {wait}s...)")
-            time.sleep(wait)
+                raise error
+
+            wait_time = 3 * attempt
+
+            print(
+                f"Temporary retrieval error: {error}"
+            )
+
+            print(
+                f"Retrying in {wait_time} seconds..."
+            )
+
+            time.sleep(wait_time)
 
 
-def ask(question: str, vectorstore, llm):
-    retriever = vectorstore.as_retriever(search_kwargs={"k": TOP_K})
-    docs = retrieve_with_retry(retriever, question)
+# ============================================================
+# ASK QUESTION
+# ============================================================
+
+def ask(
+    question: str,
+    vectorstore,
+    llm,
+):
+    """
+    Execute the complete RAG pipeline.
+
+    Args:
+        question:
+            User's question.
+
+        vectorstore:
+            Chroma vector database.
+
+        llm:
+            Groq language model.
+
+    Returns:
+        answer:
+            Grounded answer generated by the LLM.
+
+        sources:
+            List of original Stripe documentation URLs.
+    """
+
+    # --------------------------------------------------------
+    # 1. Create retriever
+    # --------------------------------------------------------
+
+    retriever = vectorstore.as_retriever(
+        search_kwargs={
+            "k": TOP_K
+        }
+    )
+
+
+    # --------------------------------------------------------
+    # 2. Retrieve relevant documentation
+    # --------------------------------------------------------
+
+    docs = retrieve_with_retry(
+        retriever,
+        question,
+    )
+
+
+    # --------------------------------------------------------
+    # 3. Handle no retrieved documents
+    # --------------------------------------------------------
 
     if not docs:
-        return "I couldn't find this in the Stripe docs I have access to.", []
+
+        return (
+            "I couldn't find this in the Stripe docs "
+            "I have access to.",
+            [],
+        )
+
+
+    # --------------------------------------------------------
+    # 4. Format retrieved context
+    # --------------------------------------------------------
 
     context = format_context(docs)
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", SYSTEM_PROMPT),
-        ("human", "{question}"),
-    ])
+
+
+    # --------------------------------------------------------
+    # 5. Create prompt
+    # --------------------------------------------------------
+
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                SYSTEM_PROMPT,
+            ),
+            (
+                "human",
+                "{question}",
+            ),
+        ]
+    )
+
+
+    # --------------------------------------------------------
+    # 6. Create LangChain chain
+    # --------------------------------------------------------
 
     chain = prompt | llm
-    response = chain.invoke({"context": context, "question": question})
 
-    sources = sorted(set(doc.metadata.get("source", "unknown") for doc in docs))
+
+    # --------------------------------------------------------
+    # 7. Generate grounded answer
+    # --------------------------------------------------------
+
+    response = chain.invoke(
+        {
+            "context": context,
+            "question": question,
+        }
+    )
+
+
+    # --------------------------------------------------------
+    # 8. Extract Stripe documentation URLs
+    # --------------------------------------------------------
+
+    sources = []
+
+    for doc in docs:
+
+        url = extract_source_url(doc)
+
+        if url and url not in sources:
+            sources.append(url)
+
+
+    # --------------------------------------------------------
+    # 9. Return answer + sources
+    # --------------------------------------------------------
+
     return response.content, sources
 
 
+# ============================================================
+# TERMINAL TEST
+# ============================================================
+
 def main():
+    """
+    Run the RAG assistant directly from the terminal.
+
+    This allows us to test the backend independently from
+    Streamlit.
+    """
+
+    print()
+    print("=" * 60)
+    print("        STRIPE DOCS AI - RAG ASSISTANT")
+    print("=" * 60)
+    print()
+
+    # Load Chroma
+    print("Initializing vector store...")
+
     vectorstore = load_vectorstore()
-    llm = ChatGoogleGenerativeAI(
-        model="models/gemini-3.6-flash",  # fast + free-tier friendly; if this model
-        # is ever retired, check https://ai.google.dev/gemini-api/docs/models
-        # for the current "flash" tier model name and swap it in here
-        google_api_key=GOOGLE_API_KEY,
-        temperature=0.2,  # low temperature keeps answers grounded, not creative
+
+    # Load Groq
+    llm = load_llm()
+
+    print()
+    print(
+        "Stripe Docs Assistant is ready."
     )
 
-    print("Stripe Docs Assistant ready. Type a question (or 'quit' to exit).\n")
+    print(
+        "Type 'quit' or 'exit' to stop."
+    )
+
+    print()
 
     while True:
+
         question = input("You: ").strip()
-        if question.lower() in ("quit", "exit"):
+
+
+        # ----------------------------------------------------
+        # Exit
+        # ----------------------------------------------------
+
+        if question.lower() in (
+            "quit",
+            "exit",
+        ):
+
+            print()
+            print("Goodbye!")
+
             break
+
+
+        # ----------------------------------------------------
+        # Ignore empty input
+        # ----------------------------------------------------
+
         if not question:
             continue
 
-        answer, sources = ask(question, vectorstore, llm)
-        print(f"\nAssistant: {answer}")
-        if sources:
-            print("\nSources:")
-            for s in sources:
-                print(f"  - {s}")
-        print()
 
+        # ----------------------------------------------------
+        # Run RAG
+        # ----------------------------------------------------
+
+        try:
+
+            answer, sources = ask(
+                question,
+                vectorstore,
+                llm,
+            )
+
+
+            print()
+            print("Assistant:")
+            print(answer)
+
+
+            # ------------------------------------------------
+            # Sources
+            # ------------------------------------------------
+
+            if sources:
+
+                print()
+                print("Sources:")
+
+                for source in sources:
+
+                    print(
+                        f"  - {source}"
+                    )
+
+
+            print()
+
+
+        except Exception as error:
+
+            print()
+            print(
+                "Something went wrong while "
+                "processing your question."
+            )
+
+            print(
+                f"Error: {error}"
+            )
+
+            print()
+
+
+# ============================================================
+# RUN
+# ============================================================
 
 if __name__ == "__main__":
     main()
