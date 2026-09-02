@@ -1,4 +1,15 @@
 import os
+
+# ============================================================
+# CPU OPTIMIZATION FOR STREAMLIT CLOUD
+# ============================================================
+
+# Limit CPU thread usage.
+# This helps prevent CPU spikes when generating embeddings.
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 from typing import List, Tuple
 
 from dotenv import load_dotenv
@@ -38,10 +49,13 @@ PERSIST_DIR = os.path.join(
     "chroma_db"
 )
 
+# Local Hugging Face embedding model
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
+# Groq LLM
 LLM_MODEL = "openai/gpt-oss-20b"
 
+# Number of documents retrieved from Chroma
 TOP_K = 6
 
 
@@ -99,13 +113,26 @@ def load_embeddings():
     """
     Load the Hugging Face embedding model once.
 
-    The model is cached in memory so we don't reload it
+    The model is cached in memory so it is not reloaded
     every time a question is asked.
     """
 
     global _embeddings
 
     if _embeddings is None:
+
+        # ----------------------------------------------------
+        # Limit PyTorch CPU threads
+        # ----------------------------------------------------
+
+        import torch
+
+        torch.set_num_threads(1)
+        torch.set_num_interop_threads(1)
+
+        # ----------------------------------------------------
+        # Load embedding model
+        # ----------------------------------------------------
 
         _embeddings = HuggingFaceEmbeddings(
             model_name=EMBEDDING_MODEL,
@@ -407,53 +434,73 @@ if __name__ == "__main__":
     print("\nLoading resources...")
 
     vectorstore = load_vectorstore()
-
     llm = load_llm()
 
     print("Resources loaded successfully.")
-
-    # --------------------------------------------------------
-    # Ask question
-    # --------------------------------------------------------
-
-    question = input(
-        "\nAsk a Stripe question: "
-    )
-
-    # --------------------------------------------------------
-    # Run RAG
-    # --------------------------------------------------------
-
-    answer, sources = ask(
-        question,
-        vectorstore,
-        llm
-    )
-
-    # --------------------------------------------------------
-    # Display answer
-    # --------------------------------------------------------
-
-    print("\nAssistant:")
+    print("\nType 'exit' or 'quit' to stop.")
     print("-" * 50)
 
-    print(answer)
-
     # --------------------------------------------------------
-    # Display sources
+    # CONTINUOUS QUESTION LOOP
     # --------------------------------------------------------
 
-    print("\nSources:")
-    print("-" * 50)
+    while True:
 
-    if sources:
+        question = input("\nAsk a Stripe question: ").strip()
 
-        for source in sources:
+        # ----------------------------------------------------
+        # Exit condition
+        # ----------------------------------------------------
 
-            print(f"- {source}")
+        if question.lower() in ["exit", "quit"]:
 
-    else:
+            print("\nGoodbye! 👋")
+            break
 
-        print("- No source URL found.")
+        # ----------------------------------------------------
+        # Empty question
+        # ----------------------------------------------------
 
-    print("\n")
+        if not question:
+
+            print("Please enter a question.")
+
+            continue
+
+        # ----------------------------------------------------
+        # Run RAG
+        # ----------------------------------------------------
+
+        answer, sources = ask(
+            question,
+            vectorstore,
+            llm
+        )
+
+        # ----------------------------------------------------
+        # Display answer
+        # ----------------------------------------------------
+
+        print("\nAssistant:")
+        print("-" * 50)
+
+        print(answer)
+
+        # ----------------------------------------------------
+        # Display sources
+        # ----------------------------------------------------
+
+        print("\nSources:")
+        print("-" * 50)
+
+        if sources:
+
+            for source in sources:
+
+                print(f"- {source}")
+
+        else:
+
+            print("- No source URL found.")
+
+        print("-" * 50)
